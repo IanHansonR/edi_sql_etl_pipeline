@@ -1,0 +1,14 @@
+# Excluded directories (reference/context only, not part of SQL project)
+Analytics_ETL_Pipeline/
+context/
+Reports_Am/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
