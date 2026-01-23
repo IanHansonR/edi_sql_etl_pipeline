@@ -37,6 +37,7 @@ BEGIN
         FROM EDIGatewayInbound
         WHERE CompanyCode = 'Kohls'
           AND TransactionType = '850'
+          AND Status = 'Downloaded'
           AND ReportingProcessStatus IS NULL
           AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.ReferencePOType') = 'PACK BY STORE'
         ORDER BY Created ASC;

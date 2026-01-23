@@ -26,6 +26,7 @@ BEGIN
         FROM EDIGatewayInbound
         WHERE CompanyCode = 'Kohls'
           AND TransactionType = '850'
+          AND Status = 'Downloaded'
           AND ReportingProcessStatus IS NULL
           AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.ReferencePOType') = 'BULK'
         ORDER BY Created ASC;
@@ -87,8 +88,8 @@ BEGIN
                 JSON_VALUE(detail.value, '$.UOMTypeCode') AS UOM,
                 TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS DECIMAL(18,4)) AS UnitPrice,
                 TRY_CAST(JSON_VALUE(detail.value, '$.RetailPrice') AS DECIMAL(18,4)) AS RetailPrice,
-                TRY_CAST(JSON_VALUE(detail.value, '$.PackSize') AS INT) AS InnerPack,
-                TRY_CAST(JSON_VALUE(detail.value, '$.Pack') AS INT) AS QtyPerInnerPack,
+                TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.Pack'), '') AS INT) AS InnerPack,
+                TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.PackSize'), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON
             FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
             WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
@@ -106,8 +107,8 @@ BEGIN
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UOMTypeCode') AS UOM,
                 TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS DECIMAL(18,4)) AS UnitPrice,
                 TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.RetailPrice') AS DECIMAL(18,4)) AS RetailPrice,
-                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.PackSize') AS INT) AS InnerPack,
-                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.Pack') AS INT) AS QtyPerInnerPack,
+                TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.Pack'), '') AS INT) AS InnerPack,
+                TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.PackSize'), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.DestinationInfo.SDQ') AS SDQ_JSON
             WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
               AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
