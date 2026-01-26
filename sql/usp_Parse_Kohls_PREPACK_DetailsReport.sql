@@ -1,17 +1,18 @@
 /*
-    Stored Procedure: usp_Parse_Kohls_PREPACK
-    Purpose: Parse Kohl's PREPACK and COMPOUND PREPACK EDI 850 orders from EDIGatewayInbound and populate reporting tables
+    Stored Procedure: usp_Parse_Kohls_PREPACK_DetailsReport
+    Purpose: Parse Kohl's PREPACK and COMPOUND PREPACK EDI 850 orders from EDIGatewayInbound and populate Details Report tables
 
     Source: EDIGatewayInbound (filtered by CompanyCode = 'Kohls', ReferencePOType IN ('PREPACK', 'COMPOUND PREPACK'))
-    Target: EDI_Report_Header, EDI_Report_Detail, EDI_Report_BOM_Component
+    Target: Custom88DetailsReportHeader, Custom88DetailsReportDetail
 
     Note: This is a simplified version with no logging, minimal error handling, no transactions.
 
     PREPACK orders have BOMDetails - each line item is a "master" prepack SKU that breaks down into
     component sizes. For each store allocation, we create one detail row per BOM component.
+    The detail rows contain the exploded BOM component data (ComponentUPC, ComponentColor, ComponentSize).
 */
 
-CREATE OR ALTER PROCEDURE dbo.usp_Parse_Kohls_PREPACK
+CREATE OR ALTER PROCEDURE dbo.usp_Parse_Kohls_PREPACK_DetailsReport
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -31,6 +32,7 @@ BEGIN
           AND TransactionType = '850'
           AND Status = 'Downloaded'
           AND ReportingProcessStatus IS NULL
+          AND ISJSON(JSONContent) = 1
           AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.ReferencePOType') IN ('PREPACK', 'COMPOUND PREPACK')
         ORDER BY Created ASC;
 
@@ -40,15 +42,14 @@ BEGIN
     WHILE @@FETCH_STATUS = 0
     BEGIN
         -- Variables for header
-        DECLARE @CustomerPO VARCHAR(50),
-                @Company VARCHAR(100),
-                @OrderDate DATE,
+        DECLARE @CustomerPO NVARCHAR(100),
+                @Company NVARCHAR(100),
                 @StartDate DATE,
-                @CompleteDate DATE,
-                @Department VARCHAR(100),
-                @POType VARCHAR(50),
+                @CancelDate DATE,
+                @Department NVARCHAR(100),
+                @POType NVARCHAR(100),
                 @Version INT,
-                @HeaderId INT;
+                @HeaderId BIGINT;
 
         -- Extract header fields
         SET @CustomerPO = JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrderNumber');
@@ -57,24 +58,23 @@ BEGIN
         SET @POType = JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.ReferencePOType');
 
         -- Parse dates (YYYYMMDD format)
-        SET @OrderDate = TRY_CONVERT(DATE, JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.OrderDate'), 112);
         SET @StartDate = TRY_CONVERT(DATE, JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.RequestedShipDate'), 112);
-        SET @CompleteDate = TRY_CONVERT(DATE, JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.CancelDate'), 112);
+        SET @CancelDate = TRY_CONVERT(DATE, JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.CancelDate'), 112);
 
         -- Calculate version number (count of existing records with earlier download dates + 1)
         SELECT @Version = COUNT(*) + 1
-        FROM EDI_Report_Header
+        FROM Custom88DetailsReportHeader
         WHERE CustomerPO = @CustomerPO
-          AND DownloadDate < @DownloadDate;
+          AND DateDownloaded < @DownloadDate;
 
-        -- Insert header
-        INSERT INTO EDI_Report_Header (
-            CustomerPO, Company, StartDate, CompleteDate, Department,
-            DownloadDate, OrderDate, POType, Version, SourceTableId, ProcessedDate
+        -- Insert header (TotalItems and TotalQty will be updated after details are inserted)
+        INSERT INTO Custom88DetailsReportHeader (
+            Company, POType, CustomerPO, DateDownloaded,
+            TotalItems, TotalQty, StartDate, CancelDate, Department, Version
         )
         VALUES (
-            @CustomerPO, @Company, @StartDate, @CompleteDate, @Department,
-            @DownloadDate, @OrderDate, @POType, @Version, @Id, GETDATE()
+            @Company, @POType, @CustomerPO, CAST(@DownloadDate AS DATE),
+            0, 0, @StartDate, @CancelDate, @Department, @Version
         );
 
         SET @HeaderId = SCOPE_IDENTITY();
@@ -86,13 +86,11 @@ BEGIN
             SELECT
                 JSON_VALUE(detail.value, '$.LineItemId') AS LineItemId,
                 JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
-                JSON_VALUE(detail.value, '$.ColorDescription') AS Color,
-                JSON_VALUE(detail.value, '$.SizeDescription') AS Size,
                 JSON_VALUE(detail.value, '$.GTIN') AS MasterUPC,
                 JSON_VALUE(detail.value, '$.BuyerPartNumber') AS SKU,
                 JSON_VALUE(detail.value, '$.UOMTypeCode') AS UOM,
-                TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS DECIMAL(18,4)) AS MasterUnitPrice,
-                TRY_CAST(JSON_VALUE(detail.value, '$.SalesPrice') AS DECIMAL(18,4)) AS MasterRetailPrice,
+                TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS FLOAT) AS MasterUnitPrice,
+                TRY_CAST(JSON_VALUE(detail.value, '$.SalesPrice') AS FLOAT) AS MasterRetailPrice,
                 TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.Pack'), '') AS INT) AS InnerPack,
                 TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.PackSize'), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON,
@@ -107,13 +105,11 @@ BEGIN
             SELECT
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.LineItemId') AS LineItemId,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SizeDescription') AS Size,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.GTIN') AS MasterUPC,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BuyerPartNumber') AS SKU,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UOMTypeCode') AS UOM,
-                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS DECIMAL(18,4)) AS MasterUnitPrice,
-                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SalesPrice') AS DECIMAL(18,4)) AS MasterRetailPrice,
+                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS FLOAT) AS MasterUnitPrice,
+                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SalesPrice') AS FLOAT) AS MasterRetailPrice,
                 TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.Pack'), '') AS INT) AS InnerPack,
                 TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.PackSize'), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.DestinationInfo.SDQ') AS SDQ_JSON,
@@ -137,8 +133,7 @@ BEGIN
                 JSON_VALUE(bom.value, '$.GTIN') AS ComponentUPC,
                 JSON_VALUE(bom.value, '$.ColorDescription') AS ComponentColor,
                 JSON_VALUE(bom.value, '$.SizeDescription') AS ComponentSize,
-                TRY_CAST(JSON_VALUE(bom.value, '$.Quantity') AS INT) AS ComponentQtyPerPack,
-                TRY_CAST(JSON_VALUE(bom.value, '$.UnitPrice') AS DECIMAL(18,4)) AS ComponentUnitPrice
+                TRY_CAST(JSON_VALUE(bom.value, '$.Quantity') AS INT) AS ComponentQtyPerPack
             FROM LineItems li
             CROSS APPLY OPENJSON(li.BOMDetails_JSON) AS bom
             WHERE li.BOMDetails_JSON IS NOT NULL
@@ -173,7 +168,6 @@ BEGIN
                 s.ComponentColor,
                 s.ComponentSize,
                 s.ComponentQtyPerPack,
-                s.ComponentUnitPrice,
                 s.SDQ_Value AS StoreNumber,
                 TRY_CAST(q.SDQ_Value AS INT) AS PackQty
             FROM SDQ_Parsed s
@@ -186,11 +180,11 @@ BEGIN
               AND q.SDQ_Index % 2 = 0
         )
         -- Insert detail rows: one per BOM component per store
-        -- Qty = PackQty * ComponentQtyPerPack (packs × units per pack)
-        INSERT INTO EDI_Report_Detail (
+        -- Qty = PackQty * ComponentQtyPerPack (packs x units per pack)
+        INSERT INTO Custom88DetailsReportDetail (
             HeaderId, Style, Color, Size, UPC, SKU,
             Qty, UOM, UnitPrice, RetailPrice, InnerPack, QtyPerInnerPack,
-            DC, StoreNumber, IsBOM
+            StoreNumber
         )
         SELECT
             @HeaderId,
@@ -199,101 +193,21 @@ BEGIN
             ComponentSize,
             ComponentUPC,
             SKU,
-            PackQty * ComponentQtyPerPack AS Qty,  -- Total units = packs × units per pack * ComponentQtyPerPack
+            PackQty * ComponentQtyPerPack AS Qty,
             UOM,
-            MasterUnitPrice,      -- Line item level unit price
-            MasterRetailPrice,    -- Line item level retail price (from SalesPrice)
+            MasterUnitPrice,
+            MasterRetailPrice,
             InnerPack,
             QtyPerInnerPack,
-            NULL AS DC,
-            StoreNumber,
-            1 AS IsBOM  -- PREPACK orders are BOM
+            StoreNumber
         FROM StoreAllocations
         WHERE PackQty > 0;
 
-        -- Insert BOM component records
-        -- Need to get the DetailId for each inserted detail row
-        -- Using a separate insert with OUTPUT or matching after the fact
-        ;WITH LineItems AS (
-            SELECT
-                JSON_VALUE(detail.value, '$.LineItemId') AS LineItemId,
-                JSON_VALUE(detail.value, '$.GTIN') AS MasterUPC,
-                JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON,
-                JSON_QUERY(detail.value, '$.BOMDetails') AS BOMDetails_JSON
-            FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
-            WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
-              AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '['
-
-            UNION ALL
-
-            SELECT
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.LineItemId') AS LineItemId,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.GTIN') AS MasterUPC,
-                JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.DestinationInfo.SDQ') AS SDQ_JSON,
-                JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') AS BOMDetails_JSON
-            WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
-              AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
-        ),
-        BOMComponents AS (
-            SELECT
-                li.LineItemId,
-                li.MasterUPC,
-                li.SDQ_JSON,
-                JSON_VALUE(bom.value, '$.GTIN') AS ComponentUPC,
-                JSON_VALUE(bom.value, '$.SizeDescription') AS ComponentSize,
-                TRY_CAST(JSON_VALUE(bom.value, '$.Quantity') AS INT) AS ComponentQtyPerPack,
-                TRY_CAST(JSON_VALUE(bom.value, '$.UnitPrice') AS DECIMAL(18,4)) AS ComponentUnitPrice
-            FROM LineItems li
-            CROSS APPLY OPENJSON(li.BOMDetails_JSON) AS bom
-            WHERE li.BOMDetails_JSON IS NOT NULL
-        ),
-        SDQ_Parsed AS (
-            SELECT
-                bc.*,
-                sdq.[key] AS SDQ_Key,
-                sdq.value AS SDQ_Value,
-                TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) AS SDQ_Index
-            FROM BOMComponents bc
-            CROSS APPLY OPENJSON(bc.SDQ_JSON) AS sdq
-            WHERE bc.SDQ_JSON IS NOT NULL
-              AND sdq.[key] LIKE 'SDQ%'
-              AND TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) >= 3
-        ),
-        StoreAllocations AS (
-            SELECT
-                s.LineItemId,
-                s.MasterUPC,
-                s.ComponentUPC,
-                s.ComponentSize,
-                s.ComponentQtyPerPack,
-                s.ComponentUnitPrice,
-                s.SDQ_Value AS StoreNumber,
-                TRY_CAST(q.SDQ_Value AS INT) AS PackQty
-            FROM SDQ_Parsed s
-            INNER JOIN SDQ_Parsed q
-                ON s.LineItemId = q.LineItemId
-                AND s.MasterUPC = q.MasterUPC
-                AND s.ComponentUPC = q.ComponentUPC
-                AND s.SDQ_Index + 1 = q.SDQ_Index
-            WHERE s.SDQ_Index % 2 = 1
-              AND q.SDQ_Index % 2 = 0
-        )
-        INSERT INTO EDI_Report_BOM_Component (
-            DetailId, ComponentSKU, ComponentSize, ComponentQty, ComponentUnitPrice, ComponentRetailPrice
-        )
-        SELECT
-            d.Id AS DetailId,
-            sa.ComponentUPC AS ComponentSKU,
-            sa.ComponentSize,
-            sa.PackQty * sa.ComponentQtyPerPack AS ComponentQty,
-            sa.ComponentUnitPrice,
-            NULL AS ComponentRetailPrice
-        FROM StoreAllocations sa
-        INNER JOIN EDI_Report_Detail d
-            ON d.HeaderId = @HeaderId
-            AND d.UPC = sa.ComponentUPC
-            AND d.StoreNumber = sa.StoreNumber
-        WHERE sa.PackQty > 0;
+        -- Update header with TotalItems and TotalQty
+        UPDATE Custom88DetailsReportHeader
+        SET TotalItems = (SELECT COUNT(*) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId),
+            TotalQty = (SELECT ISNULL(SUM(Qty), 0) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId)
+        WHERE Id = @HeaderId;
 
         -- Mark as processed
         UPDATE EDIGatewayInbound

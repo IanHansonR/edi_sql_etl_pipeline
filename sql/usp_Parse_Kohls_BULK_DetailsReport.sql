@@ -1,0 +1,197 @@
+/*
+    Stored Procedure: usp_Parse_Kohls_BULK_DetailsReport
+    Purpose: Parse Kohl's BULK EDI 850 orders from EDIGatewayInbound and populate Details Report tables
+
+    Source: EDIGatewayInbound (filtered by CompanyCode = 'Kohls', ReferencePOType = 'BULK')
+    Target: Custom88DetailsReportHeader, Custom88DetailsReportDetail
+
+    Note: This is a simplified version with no logging, minimal error handling, no transactions.
+*/
+
+CREATE OR ALTER PROCEDURE dbo.usp_Parse_Kohls_BULK_DetailsReport
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Process each unprocessed Kohl's BULK record
+    DECLARE @Id INT,
+            @JSONContent NVARCHAR(MAX),
+            @DownloadDate DATETIME;
+
+    DECLARE record_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT
+            Id,
+            JSONContent,
+            Created AS DownloadDate
+        FROM EDIGatewayInbound
+        WHERE CompanyCode = 'Kohls'
+          AND TransactionType = '850'
+          AND Status = 'Downloaded'
+          AND ReportingProcessStatus IS NULL
+          AND ISJSON(JSONContent) = 1
+          AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.ReferencePOType') = 'BULK'
+        ORDER BY Created ASC;
+
+    OPEN record_cursor;
+    FETCH NEXT FROM record_cursor INTO @Id, @JSONContent, @DownloadDate;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        -- Variables for header
+        DECLARE @CustomerPO NVARCHAR(100),
+                @Company NVARCHAR(100),
+                @StartDate DATE,
+                @CancelDate DATE,
+                @Department NVARCHAR(100),
+                @Version INT,
+                @HeaderId BIGINT;
+
+        -- Extract header fields
+        SET @CustomerPO = JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrderNumber');
+        SET @Company = JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.CompanyCode');
+        SET @Department = JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.DepartmentNumber');
+
+        -- Parse dates (YYYYMMDD format)
+        SET @StartDate = TRY_CONVERT(DATE, JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.RequestedShipDate'), 112);
+        SET @CancelDate = TRY_CONVERT(DATE, JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.CancelDate'), 112);
+
+        -- Calculate version number (count of existing records with earlier download dates + 1)
+        SELECT @Version = COUNT(*) + 1
+        FROM Custom88DetailsReportHeader
+        WHERE CustomerPO = @CustomerPO
+          AND DateDownloaded < @DownloadDate;
+
+        -- Insert header (TotalItems and TotalQty will be updated after details are inserted)
+        INSERT INTO Custom88DetailsReportHeader (
+            Company, POType, CustomerPO, DateDownloaded,
+            TotalItems, TotalQty, StartDate, CancelDate, Department, Version
+        )
+        VALUES (
+            @Company, 'BULK', @CustomerPO, CAST(@DownloadDate AS DATE),
+            0, 0, @StartDate, @CancelDate, @Department, @Version
+        );
+
+        SET @HeaderId = SCOPE_IDENTITY();
+
+        -- Parse line items and explode by store allocation
+        -- Handle both array and single-object formats for PurchaseOrderDetails
+        ;WITH LineItems AS (
+            -- Case 1: PurchaseOrderDetails is an array
+            SELECT
+                JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
+                JSON_VALUE(detail.value, '$.ColorDescription') AS Color,
+                JSON_VALUE(detail.value, '$.SizeDescription') AS Size,
+                JSON_VALUE(detail.value, '$.GTIN') AS UPC,
+                JSON_VALUE(detail.value, '$.BuyerPartNumber') AS SKU,
+                JSON_VALUE(detail.value, '$.UOMTypeCode') AS UOM,
+                TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS FLOAT) AS UnitPrice,
+                TRY_CAST(JSON_VALUE(detail.value, '$.RetailPrice') AS FLOAT) AS RetailPrice,
+                TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.Pack'), '') AS INT) AS InnerPack,
+                TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.PackSize'), '') AS INT) AS QtyPerInnerPack,
+                JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON
+            FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
+            WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
+              AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '['
+
+            UNION ALL
+
+            -- Case 2: PurchaseOrderDetails is a single object
+            SELECT
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SizeDescription') AS Size,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.GTIN') AS UPC,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BuyerPartNumber') AS SKU,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UOMTypeCode') AS UOM,
+                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS FLOAT) AS UnitPrice,
+                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.RetailPrice') AS FLOAT) AS RetailPrice,
+                TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.Pack'), '') AS INT) AS InnerPack,
+                TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.PackSize'), '') AS INT) AS QtyPerInnerPack,
+                JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.DestinationInfo.SDQ') AS SDQ_JSON
+            WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
+              AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
+        ),
+        -- Parse SDQ key-value pairs and pair up stores with quantities
+        SDQ_Parsed AS (
+            SELECT
+                li.*,
+                sdq.[key] AS SDQ_Key,
+                sdq.value AS SDQ_Value,
+                TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) AS SDQ_Index
+            FROM LineItems li
+            CROSS APPLY OPENJSON(li.SDQ_JSON) AS sdq
+            WHERE li.SDQ_JSON IS NOT NULL
+              AND sdq.[key] LIKE 'SDQ%'
+              AND TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) >= 3
+        ),
+        -- Pair stores (odd index) with quantities (even index)
+        StoreAllocations AS (
+            SELECT
+                s.Style, s.Color, s.Size, s.UPC, s.SKU, s.UOM,
+                s.UnitPrice, s.RetailPrice, s.InnerPack, s.QtyPerInnerPack,
+                s.SDQ_Value AS StoreNumber,
+                TRY_CAST(q.SDQ_Value AS INT) AS Qty
+            FROM SDQ_Parsed s
+            INNER JOIN SDQ_Parsed q
+                ON s.Style = q.Style
+                AND s.UPC = q.UPC
+                AND s.SDQ_Index + 1 = q.SDQ_Index
+            WHERE s.SDQ_Index % 2 = 1
+              AND q.SDQ_Index % 2 = 0
+        ),
+        -- Line items without SDQ data get NULL store/qty
+        NoSDQ_Items AS (
+            SELECT
+                Style, Color, Size, UPC, SKU, UOM,
+                UnitPrice, RetailPrice, InnerPack, QtyPerInnerPack,
+                CAST(NULL AS NVARCHAR(100)) AS StoreNumber,
+                CAST(NULL AS INT) AS Qty
+            FROM LineItems
+            WHERE SDQ_JSON IS NULL
+        ),
+        -- Combine both sets
+        AllDetails AS (
+            SELECT * FROM StoreAllocations WHERE Qty > 0
+            UNION ALL
+            SELECT * FROM NoSDQ_Items
+        )
+        INSERT INTO Custom88DetailsReportDetail (
+            HeaderId, Style, Color, Size, UPC, SKU,
+            Qty, UOM, UnitPrice, RetailPrice, InnerPack, QtyPerInnerPack,
+            StoreNumber
+        )
+        SELECT
+            @HeaderId,
+            Style,
+            Color,
+            Size,
+            UPC,
+            SKU,
+            Qty,
+            UOM,
+            UnitPrice,
+            RetailPrice,
+            InnerPack,
+            QtyPerInnerPack,
+            StoreNumber
+        FROM AllDetails;
+
+        -- Update header with TotalItems and TotalQty
+        UPDATE Custom88DetailsReportHeader
+        SET TotalItems = (SELECT COUNT(*) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId),
+            TotalQty = (SELECT ISNULL(SUM(Qty), 0) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId)
+        WHERE Id = @HeaderId;
+
+        -- Mark as processed
+        UPDATE EDIGatewayInbound
+        SET ReportingProcessStatus = 'Success',
+            ReportingProcessed = GETDATE()
+        WHERE Id = @Id;
+
+        FETCH NEXT FROM record_cursor INTO @Id, @JSONContent, @DownloadDate;
+    END;
+
+    CLOSE record_cursor;
+    DEALLOCATE record_cursor;
+END;
+GO
