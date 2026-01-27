@@ -7,9 +7,19 @@
 
     Note: This is a simplified version with no logging, minimal error handling, no transactions.
 
-    PREPACK orders have BOMDetails - each line item is a "master" prepack SKU that breaks down into
-    component sizes. For each store allocation, we create one detail row per BOM component.
-    The detail rows contain the exploded BOM component data (ComponentUPC, ComponentColor, ComponentSize).
+    PREPACK Detail Mapping:
+    - UPC = PurchaseOrderDetails.ProductId
+    - SKU = PurchaseOrderDetails.BuyerPartNumber
+    - Style = PurchaseOrderDetails.VendorItemNumber
+    - Color = First BOMDetails.ColorDescription (all components share same color)
+    - Size = "PPK" (hardcoded for prepack)
+    - UnitPrice = PurchaseOrderDetails.UnitPrice
+    - RetailPrice = PurchaseOrderDetails.SalesPrice
+    - UOM = PurchaseOrderDetails.UOMTypeCode
+    - Qty = Parsed from SDQ (pack quantity)
+    - InnerPack = PurchaseOrderDetails.Pack
+    - QtyPerInnerPack = PurchaseOrderDetails.PackSize
+    - StoreNumber = Parsed from SDQ
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Kohls_PREPACK_DetailsReport
@@ -79,18 +89,18 @@ BEGIN
 
         SET @HeaderId = SCOPE_IDENTITY();
 
-        -- Parse line items with BOM details and store allocations
+        -- Parse line items from PurchaseOrderDetails
         -- Handle both array and single-object formats for PurchaseOrderDetails
         ;WITH LineItems AS (
             -- Case 1: PurchaseOrderDetails is an array
             SELECT
                 JSON_VALUE(detail.value, '$.LineItemId') AS LineItemId,
                 JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
-                JSON_VALUE(detail.value, '$.GTIN') AS MasterUPC,
+                JSON_VALUE(detail.value, '$.ProductId') AS UPC,
                 JSON_VALUE(detail.value, '$.BuyerPartNumber') AS SKU,
                 JSON_VALUE(detail.value, '$.UOMTypeCode') AS UOM,
-                TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS FLOAT) AS MasterUnitPrice,
-                TRY_CAST(JSON_VALUE(detail.value, '$.SalesPrice') AS FLOAT) AS MasterRetailPrice,
+                TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS FLOAT) AS UnitPrice,
+                TRY_CAST(JSON_VALUE(detail.value, '$.SalesPrice') AS FLOAT) AS RetailPrice,
                 TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.Pack'), '') AS INT) AS InnerPack,
                 TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.PackSize'), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON,
@@ -105,11 +115,11 @@ BEGIN
             SELECT
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.LineItemId') AS LineItemId,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.GTIN') AS MasterUPC,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS UPC,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BuyerPartNumber') AS SKU,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UOMTypeCode') AS UOM,
-                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS FLOAT) AS MasterUnitPrice,
-                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SalesPrice') AS FLOAT) AS MasterRetailPrice,
+                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS FLOAT) AS UnitPrice,
+                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SalesPrice') AS FLOAT) AS RetailPrice,
                 TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.Pack'), '') AS INT) AS InnerPack,
                 TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.PackSize'), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.DestinationInfo.SDQ') AS SDQ_JSON,
@@ -117,70 +127,62 @@ BEGIN
             WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
               AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
         ),
-        -- Parse BOM components for each line item
-        BOMComponents AS (
+        -- Get color from first BOM component for each line item (all components share same color)
+        LineItemsWithColor AS (
             SELECT
                 li.LineItemId,
                 li.Style,
-                li.MasterUPC,
+                li.UPC,
                 li.SKU,
                 li.UOM,
-                li.MasterUnitPrice,
-                li.MasterRetailPrice,
+                li.UnitPrice,
+                li.RetailPrice,
                 li.InnerPack,
                 li.QtyPerInnerPack,
                 li.SDQ_JSON,
-                JSON_VALUE(bom.value, '$.GTIN') AS ComponentUPC,
-                JSON_VALUE(bom.value, '$.ColorDescription') AS ComponentColor,
-                JSON_VALUE(bom.value, '$.SizeDescription') AS ComponentSize,
-                TRY_CAST(JSON_VALUE(bom.value, '$.Quantity') AS INT) AS ComponentQtyPerPack
+                (
+                    SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
+                    FROM OPENJSON(li.BOMDetails_JSON) AS bom
+                ) AS Color
             FROM LineItems li
-            CROSS APPLY OPENJSON(li.BOMDetails_JSON) AS bom
-            WHERE li.BOMDetails_JSON IS NOT NULL
         ),
         -- Parse SDQ key-value pairs for each line item
         SDQ_Parsed AS (
             SELECT
-                bc.*,
+                lic.*,
                 sdq.[key] AS SDQ_Key,
                 sdq.value AS SDQ_Value,
                 TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) AS SDQ_Index
-            FROM BOMComponents bc
-            CROSS APPLY OPENJSON(bc.SDQ_JSON) AS sdq
-            WHERE bc.SDQ_JSON IS NOT NULL
+            FROM LineItemsWithColor lic
+            CROSS APPLY OPENJSON(lic.SDQ_JSON) AS sdq
+            WHERE lic.SDQ_JSON IS NOT NULL
               AND sdq.[key] LIKE 'SDQ%'
               AND TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) >= 3
         ),
         -- Pair stores (odd index) with quantities (even index)
-        -- For PREPACK, the SDQ qty is number of PACKS, not units
         StoreAllocations AS (
             SELECT
                 s.LineItemId,
                 s.Style,
-                s.MasterUPC,
+                s.UPC,
                 s.SKU,
                 s.UOM,
-                s.MasterUnitPrice,
-                s.MasterRetailPrice,
+                s.UnitPrice,
+                s.RetailPrice,
                 s.InnerPack,
                 s.QtyPerInnerPack,
-                s.ComponentUPC,
-                s.ComponentColor,
-                s.ComponentSize,
-                s.ComponentQtyPerPack,
+                s.Color,
                 s.SDQ_Value AS StoreNumber,
-                TRY_CAST(q.SDQ_Value AS INT) AS PackQty
+                TRY_CAST(q.SDQ_Value AS INT) AS Qty
             FROM SDQ_Parsed s
             INNER JOIN SDQ_Parsed q
                 ON s.LineItemId = q.LineItemId
-                AND s.MasterUPC = q.MasterUPC
-                AND s.ComponentUPC = q.ComponentUPC
+                AND s.UPC = q.UPC
                 AND s.SDQ_Index + 1 = q.SDQ_Index
             WHERE s.SDQ_Index % 2 = 1
               AND q.SDQ_Index % 2 = 0
         )
-        -- Insert detail rows: one per BOM component per store
-        -- Qty = PackQty * ComponentQtyPerPack (packs x units per pack)
+        -- Insert detail rows: one per prepack per store
         INSERT INTO Custom88DetailsReportDetail (
             HeaderId, Style, Color, Size, UPC, SKU,
             Qty, UOM, UnitPrice, RetailPrice, InnerPack, QtyPerInnerPack,
@@ -189,23 +191,23 @@ BEGIN
         SELECT
             @HeaderId,
             Style,
-            ComponentColor,
-            ComponentSize,
-            ComponentUPC,
+            Color,
+            'PPK' AS Size,
+            UPC,
             SKU,
-            PackQty * ComponentQtyPerPack AS Qty,
+            Qty,
             UOM,
-            MasterUnitPrice,
-            MasterRetailPrice,
+            UnitPrice,
+            RetailPrice,
             InnerPack,
             QtyPerInnerPack,
             StoreNumber
         FROM StoreAllocations
-        WHERE PackQty > 0;
+        WHERE Qty > 0;
 
         -- Update header with TotalItems and TotalQty
         UPDATE Custom88DetailsReportHeader
-        SET TotalItems = (SELECT COUNT(*) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId),
+        SET TotalItems = (SELECT COUNT(DISTINCT UPC) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId),
             TotalQty = (SELECT ISNULL(SUM(Qty), 0) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId)
         WHERE Id = @HeaderId;
 
