@@ -178,7 +178,7 @@ BEGIN
 
         -- Update header with TotalItems and TotalQty
         UPDATE Custom88DetailsReportHeader
-        SET TotalItems = (SELECT COUNT(*) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId),
+        SET TotalItems = (SELECT COUNT(distinct UPC) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId),
             TotalQty = (SELECT ISNULL(SUM(Qty), 0) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId)
         WHERE Id = @HeaderId;
 
