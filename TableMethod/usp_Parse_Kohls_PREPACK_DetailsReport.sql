@@ -101,8 +101,8 @@ BEGIN
                 JSON_VALUE(detail.value, '$.UOMTypeCode') AS UOM,
                 TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS FLOAT) AS UnitPrice,
                 TRY_CAST(JSON_VALUE(detail.value, '$.SalesPrice') AS FLOAT) AS RetailPrice,
-                TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.Pack'), '') AS INT) AS InnerPack,
-                TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.PackSize'), '') AS INT) AS QtyPerInnerPack,
+                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.Pack'))), '') AS INT) AS InnerPack,
+                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.PackSize'))), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON,
                 JSON_QUERY(detail.value, '$.BOMDetails') AS BOMDetails_JSON
             FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
@@ -120,8 +120,8 @@ BEGIN
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UOMTypeCode') AS UOM,
                 TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS FLOAT) AS UnitPrice,
                 TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SalesPrice') AS FLOAT) AS RetailPrice,
-                TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.Pack'), '') AS INT) AS InnerPack,
-                TRY_CAST(NULLIF(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.PackSize'), '') AS INT) AS QtyPerInnerPack,
+                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.Pack'))), '') AS INT) AS InnerPack,
+                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.PackSize'))), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.DestinationInfo.SDQ') AS SDQ_JSON,
                 JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') AS BOMDetails_JSON
             WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1

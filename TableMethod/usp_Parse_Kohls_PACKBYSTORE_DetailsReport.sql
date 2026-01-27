@@ -91,8 +91,8 @@ BEGIN
                 JSON_VALUE(detail.value, '$.UOMTypeCode') AS UOM,
                 TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS FLOAT) AS UnitPrice,
                 TRY_CAST(JSON_VALUE(detail.value, '$.SalesPrice') AS FLOAT) AS RetailPrice,
-                TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.Pack'), '') AS INT) AS InnerPack,
-                TRY_CAST(NULLIF(JSON_VALUE(detail.value, '$.PackSize'), '') AS INT) AS QtyPerInnerPack,
+                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.Pack'))), '') AS INT) AS InnerPack,
+                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.PackSize'))), '') AS INT) AS QtyPerInnerPack,
                 JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON
             FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
         ),
@@ -179,7 +179,7 @@ BEGIN
 
         -- Update header with TotalItems and TotalQty
         UPDATE Custom88DetailsReportHeader
-        SET TotalItems = (SELECT COUNT(*) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId),
+        SET TotalItems = (SELECT COUNT(DISTINCT UPC) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId),
             TotalQty = (SELECT ISNULL(SUM(Qty), 0) FROM Custom88DetailsReportDetail WHERE HeaderId = @HeaderId)
         WHERE Id = @HeaderId;
 
