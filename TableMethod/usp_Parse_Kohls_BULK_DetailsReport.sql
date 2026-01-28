@@ -27,7 +27,7 @@ BEGIN
         WHERE CompanyCode = 'Kohls'
           AND TransactionType = '850'
           AND Status = 'Downloaded'
-          AND ReportingProcessStatus IS NULL
+          AND DetailsReportStatus IS NULL
           AND ISJSON(JSONContent) = 1
           AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.ReferencePOType') = 'BULK'
         ORDER BY Created ASC;
@@ -64,11 +64,11 @@ BEGIN
         -- Insert header (TotalItems and TotalQty will be updated after details are inserted)
         INSERT INTO Custom88DetailsReportHeader (
             Company, POType, CustomerPO, DateDownloaded,
-            TotalItems, TotalQty, StartDate, CancelDate, Department, Version
+            TotalItems, TotalQty, StartDate, CancelDate, Department, Version, SourceTableId
         )
         VALUES (
             @Company, 'BULK', @CustomerPO, CAST(@DownloadDate AS DATE),
-            0, 0, @StartDate, @CancelDate, @Department, @Version
+            0, 0, @StartDate, @CancelDate, @Department, @Version, @Id
         );
 
         SET @HeaderId = SCOPE_IDENTITY();
@@ -184,8 +184,8 @@ BEGIN
 
         -- Mark as processed
         UPDATE EDIGatewayInbound
-        SET ReportingProcessStatus = 'Success',
-            ReportingProcessed = GETDATE()
+        SET DetailsReportStatus = 'Success',
+            DetailsReportProcessed = GETDATE()
         WHERE Id = @Id;
 
         FETCH NEXT FROM record_cursor INTO @Id, @JSONContent, @DownloadDate;

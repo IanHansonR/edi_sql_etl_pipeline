@@ -12,3 +12,6 @@ Reports_Am/
 # OS
 .DS_Store
 Thumbs.db
+
+# Excluded Files
+ALTER_EDIGatewayInbound_ReportStatus.sql
