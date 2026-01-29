@@ -10,9 +10,10 @@
     PREPACK StyleColor Mapping:
     - Style = PurchaseOrderDetails.VendorItemNumber
     - Color = First BOMDetails.ColorDescription (all components share same color)
-    - QtyOrdered = SUM of SDQ quantities across all stores (aggregated by Style + Color)
+    - UPC = PurchaseOrderDetails.ProductId (prepack-level UPC, one per line item)
+    - QtyOrdered = SUM of SDQ quantities across all stores (aggregated by Style + Color + UPC)
 
-    Detail rows are aggregated by Style + Color with QtyOrdered = SUM of all store quantities.
+    Detail rows are aggregated by Style + Color + UPC with QtyOrdered = SUM of all store quantities.
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Kohls_PREPACK_StyleColorReport
@@ -138,6 +139,7 @@ BEGIN
             SELECT
                 s.Style,
                 s.Color,
+                s.UPC,
                 TRY_CAST(q.SDQ_Value AS INT) AS Qty
             FROM SDQ_Parsed s
             INNER JOIN SDQ_Parsed q
@@ -147,18 +149,19 @@ BEGIN
             WHERE s.SDQ_Index % 2 = 1
               AND q.SDQ_Index % 2 = 0
         )
-        -- Insert aggregated detail rows: one per unique Style + Color
+        -- Insert aggregated detail rows: one per unique Style + Color + UPC
         INSERT INTO Custom88StyleColorReportDetail (
-            HeaderId, Style, Color, QtyOrdered
+            HeaderId, Style, Color, UPC, QtyOrdered
         )
         SELECT
             @HeaderId,
             Style,
             Color,
+            UPC,
             SUM(Qty) AS QtyOrdered
         FROM StoreAllocations
         WHERE Qty > 0
-        GROUP BY Style, Color;
+        GROUP BY Style, Color, UPC;
 
         -- Mark as processed
         UPDATE EDIGatewayInbound
