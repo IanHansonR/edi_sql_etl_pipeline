@@ -89,7 +89,10 @@ BEGIN
             SELECT
                 JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
                 JSON_VALUE(detail.value, '$.ColorDescription') AS Color,
-                JSON_VALUE(detail.value, '$.SizeDescription') AS Size,
+                CASE
+                    WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN 'PPK'
+                    ELSE JSON_VALUE(detail.value, '$.SizeDescription')
+                END AS Size,
                 JSON_VALUE(detail.value, '$.ProductId') AS UPC,
                 JSON_VALUE(detail.value, '$.ProductId') AS SKU,
                 TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS FLOAT) AS UnitPrice,
@@ -105,7 +108,10 @@ BEGIN
             SELECT
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SizeDescription') AS Size,
+                CASE
+                    WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN 'PPK'
+                    ELSE JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SizeDescription')
+                END AS Size,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS UPC,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS SKU,
                 TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS FLOAT) AS UnitPrice,
