@@ -76,9 +76,10 @@ BEGIN
         SET @HeaderId = SCOPE_IDENTITY();
 
         -- Parse line items and aggregate by Style + Color
-        -- PurchaseOrderDetails is always an array for KN orders
+        -- Handle both array and single-object formats for PurchaseOrderDetails
         -- SDQ is an ARRAY of objects (multiple SDQ segments)
         ;WITH LineItems AS (
+            -- Case 1: PurchaseOrderDetails is an array
             SELECT
                 JSON_VALUE(detail.value, '$.LineItemId') AS LineItemId,
                 JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
@@ -86,6 +87,20 @@ BEGIN
                 JSON_VALUE(detail.value, '$.ProductId') AS UPC,
                 JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON
             FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
+            WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
+              AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '['
+
+            UNION ALL
+
+            -- Case 2: PurchaseOrderDetails is a single object
+            SELECT
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.LineItemId') AS LineItemId,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS UPC,
+                JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.DestinationInfo.SDQ') AS SDQ_JSON
+            WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
+              AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
         ),
         -- Unwrap the SDQ array - each element is an SDQ segment object
         SDQ_Segments AS (

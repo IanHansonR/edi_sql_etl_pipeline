@@ -82,9 +82,10 @@ BEGIN
         SET @HeaderId = SCOPE_IDENTITY();
 
         -- Parse line items and aggregate by Style + Color + Size + UPC
-        -- PurchaseOrderDetails is always an array for KN orders
+        -- Handle both array and single-object formats for PurchaseOrderDetails
         -- SDQ is an ARRAY of objects (multiple SDQ segments)
         ;WITH LineItems AS (
+            -- Case 1: PurchaseOrderDetails is an array
             SELECT
                 JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
                 JSON_VALUE(detail.value, '$.ColorDescription') AS Color,
@@ -95,6 +96,23 @@ BEGIN
                 TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.SalesPrice'))), '') AS FLOAT) AS RetailPrice,
                 JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON
             FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
+            WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
+              AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '['
+
+            UNION ALL
+
+            -- Case 2: PurchaseOrderDetails is a single object
+            SELECT
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SizeDescription') AS Size,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS UPC,
+                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS SKU,
+                TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS FLOAT) AS UnitPrice,
+                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.SalesPrice'))), '') AS FLOAT) AS RetailPrice,
+                JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.DestinationInfo.SDQ') AS SDQ_JSON
+            WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
+              AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
         ),
         -- Unwrap the SDQ array - each element is an SDQ segment object
         SDQ_Segments AS (
