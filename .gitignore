@@ -15,3 +15,5 @@ Thumbs.db
 
 # Excluded Files
 ALTER_EDIGatewayInbound_ReportStatus.sql
+sdq_parse_test.py
+nul

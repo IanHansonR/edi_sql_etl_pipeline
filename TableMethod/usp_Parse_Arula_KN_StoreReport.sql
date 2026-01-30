@@ -97,22 +97,36 @@ BEGIN
             WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
               AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
         ),
-        -- Unwrap the SDQ array - each element is an SDQ segment object
+        -- Unwrap the SDQ - handles both array of segment objects and single object
         SDQ_Segments AS (
+            -- Case 1: SDQ is an array of segment objects
             SELECT
                 li.UPC,
+                sdq_segment.[key] AS SDQ_Segment_Index,
                 sdq_segment.value AS SDQ_Segment_JSON
             FROM LineItems li
             CROSS APPLY OPENJSON(li.SDQ_JSON) AS sdq_segment
             WHERE li.SDQ_JSON IS NOT NULL
               AND ISJSON(li.SDQ_JSON) = 1
               AND LEFT(LTRIM(li.SDQ_JSON), 1) = '['
+
+            UNION ALL
+
+            -- Case 2: SDQ is a single object
+            SELECT
+                li.UPC,
+                '0' AS SDQ_Segment_Index,
+                li.SDQ_JSON AS SDQ_Segment_JSON
+            FROM LineItems li
+            WHERE li.SDQ_JSON IS NOT NULL
+              AND ISJSON(li.SDQ_JSON) = 1
+              AND LEFT(LTRIM(li.SDQ_JSON), 1) = '{'
         ),
         -- Parse each SDQ segment's key-value pairs
         SDQ_Parsed AS (
             SELECT
                 ss.UPC,
-                ss.SDQ_Segment_JSON,
+                ss.SDQ_Segment_Index,
                 sdq.[key] AS SDQ_Key,
                 sdq.value AS SDQ_Value,
                 TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) AS SDQ_Index
@@ -129,7 +143,7 @@ BEGIN
             FROM SDQ_Parsed s
             INNER JOIN SDQ_Parsed q
                 ON s.UPC = q.UPC
-                AND s.SDQ_Segment_JSON = q.SDQ_Segment_JSON
+                AND s.SDQ_Segment_Index = q.SDQ_Segment_Index
                 AND s.SDQ_Index + 1 = q.SDQ_Index
             WHERE s.SDQ_Index % 2 = 1
               AND q.SDQ_Index % 2 = 0
