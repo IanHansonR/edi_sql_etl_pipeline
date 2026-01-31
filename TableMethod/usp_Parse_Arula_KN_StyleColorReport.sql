@@ -8,8 +8,8 @@
     Prerequisite: DetailsReport must have processed the record first (DetailsReportStatus = 'Success')
 
     Arula KN SDQ is an ARRAY of objects (multiple SDQ segments).
-    Detail rows are aggregated by Style + Color with QtyOrdered = SUM of all store quantities.
-    UPC is not populated for Arula StyleColorReport.
+    Detail rows are aggregated by Style + Color + UPC with QtyOrdered = SUM of all store quantities.
+    UPC = PurchaseOrderDetails.ProductId (one distinct row per UPC).
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Arula_KN_StyleColorReport
@@ -154,6 +154,7 @@ BEGIN
             SELECT
                 s.Style,
                 s.Color,
+                s.UPC,
                 TRY_CAST(q.SDQ_Value AS INT) AS Qty
             FROM SDQ_Parsed s
             INNER JOIN SDQ_Parsed q
@@ -164,18 +165,19 @@ BEGIN
             WHERE s.SDQ_Index % 2 = 1
               AND q.SDQ_Index % 2 = 0
         )
-        -- Insert aggregated detail rows: one per unique Style + Color
+        -- Insert aggregated detail rows: one per unique Style + Color + UPC
         INSERT INTO Custom88StyleColorReportDetail (
-            HeaderId, Style, Color, QtyOrdered
+            HeaderId, Style, Color, UPC, QtyOrdered
         )
         SELECT
             @HeaderId,
             Style,
             Color,
+            UPC,
             SUM(Qty) AS QtyOrdered
         FROM StoreAllocations
         WHERE Qty > 0
-        GROUP BY Style, Color;
+        GROUP BY Style, Color, UPC;
 
         -- Mark as processed
         UPDATE EDIGatewayInbound
