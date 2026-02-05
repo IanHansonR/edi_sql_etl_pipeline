@@ -85,8 +85,8 @@ BEGIN
                 JSON_VALUE(detail.value, '$.SizeDescription') AS Size,
                 JSON_VALUE(detail.value, '$.GTIN') AS UPC,
                 JSON_VALUE(detail.value, '$.BuyerPartNumber') AS SKU,
-                TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS FLOAT) AS UnitPrice,
-                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.SalesPrice'))), '') AS FLOAT) AS RetailPrice,
+                TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS DECIMAL(18,2)) AS UnitPrice,
+                TRY_CAST(NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.SalesPrice'))), '') AS DECIMAL(18,2)) AS RetailPrice,
                 JSON_QUERY(detail.value, '$.DestinationInfo.SDQ') AS SDQ_JSON
             FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
         ),
