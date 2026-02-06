@@ -59,19 +59,20 @@ BEGIN
         SET @StartDate = TRY_CONVERT(DATE, JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.RequestedShipDate'), 112);
         SET @CancelDate = TRY_CONVERT(DATE, JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.CancelDate'), 112);
 
-        -- Calculate version number (count of existing records with earlier download dates + 1)
+        -- Calculate version number scoped by Company + CustomerPO with datetime precision
         SELECT @Version = COUNT(*) + 1
         FROM Custom88DetailsReportHeader
-        WHERE CustomerPO = @CustomerPO
-          AND DateDownloaded < @DownloadDate;
+        WHERE Company = @Company
+          AND CustomerPO = @CustomerPO
+          AND DateDownloadedDateTime < @DownloadDate;
 
         -- Insert header (TotalItems and TotalQty will be updated after details are inserted)
         INSERT INTO Custom88DetailsReportHeader (
-            Company, POType, CustomerPO, DateDownloaded,
+            Company, POType, CustomerPO, DateDownloaded, DateDownloadedDateTime,
             TotalItems, TotalQty, StartDate, CancelDate, Department, Version, SourceTableId
         )
         VALUES (
-            @Company, 'PACK BY STORE', @CustomerPO, CAST(@DownloadDate AS DATE),
+            @Company, 'PACK BY STORE', @CustomerPO, CAST(@DownloadDate AS DATE), @DownloadDate,
             0, 0, @StartDate, @CancelDate, @Department, @Version, @Id
         );
 
