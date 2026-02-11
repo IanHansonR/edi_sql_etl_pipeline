@@ -30,7 +30,8 @@ BEGIN
     -- Process each unprocessed Belk SA record
     DECLARE @Id INT,
             @JSONContent NVARCHAR(MAX),
-            @DownloadDate DATETIME;
+            @DownloadDate DATETIME,
+            @CompanyId nvarchar(100);
 
     DECLARE record_cursor CURSOR LOCAL FAST_FORWARD FOR
         SELECT
@@ -89,6 +90,7 @@ BEGIN
         );
 
         SET @HeaderId = SCOPE_IDENTITY();
+        SET @CompanyId = (SELECT TOP 1 CompanyId FROM WMS.dbo.Company WHERE Company = @Company) --new
 
         -- Parse line items and explode by store allocation
         -- Handle both array and single-object formats for PurchaseOrderDetails
@@ -130,14 +132,26 @@ BEGIN
             WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
               AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
         ),
+        -- Lookup Color and Size from WMS database
+        WMS_Lookup AS (
+            SELECT
+                li.LineItemId,
+                li.UPC,
+                pr.Color AS WMS_Color, --new
+                pr.Size AS WMS_Size --new
+            FROM LineItems li
+            LEFT JOIN WMS.dbo.product p ON p.ProductId = li.UPC --new
+            LEFT JOIN WMS.dbo.product_retail pr ON pr.Pid = p.Pid --new
+            WHERE p.CompanyId = @CompanyId --new
+        ),
         -- Unwrap the SDQ - handles both array of segment objects and single object
         SDQ_Segments AS (
             -- Case 1: SDQ is an array of segment objects
             SELECT
                 li.LineItemId,
                 li.Style,
-                li.Color,
-                li.Size,
+                COALESCE(wms.WMS_Color, li.Color) AS Color,  -- WMS first, JSON fallback
+                COALESCE(wms.WMS_Size, li.Size) AS Size,     -- WMS first, JSON fallback
                 li.UPC,
                 li.SKU,
                 li.UOM,
@@ -148,6 +162,7 @@ BEGIN
                 sdq_segment.[key] AS SDQ_Segment_Index,
                 sdq_segment.value AS SDQ_Segment_JSON
             FROM LineItems li
+            LEFT JOIN WMS_Lookup wms ON wms.LineItemId = li.LineItemId
             CROSS APPLY OPENJSON(li.SDQ_JSON) AS sdq_segment
             WHERE li.SDQ_JSON IS NOT NULL
               AND ISJSON(li.SDQ_JSON) = 1
@@ -159,8 +174,8 @@ BEGIN
             SELECT
                 li.LineItemId,
                 li.Style,
-                li.Color,
-                li.Size,
+                COALESCE(wms.WMS_Color, li.Color) AS Color,  -- WMS first, JSON fallback
+                COALESCE(wms.WMS_Size, li.Size) AS Size,     -- WMS first, JSON fallback
                 li.UPC,
                 li.SKU,
                 li.UOM,
@@ -171,6 +186,7 @@ BEGIN
                 '0' AS SDQ_Segment_Index,
                 li.SDQ_JSON AS SDQ_Segment_JSON
             FROM LineItems li
+            LEFT JOIN WMS_Lookup wms ON wms.LineItemId = li.LineItemId
             WHERE li.SDQ_JSON IS NOT NULL
               AND ISJSON(li.SDQ_JSON) = 1
               AND LEFT(LTRIM(li.SDQ_JSON), 1) = '{'

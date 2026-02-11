@@ -27,7 +27,8 @@ BEGIN
 
     DECLARE @Id INT,
             @JSONContent NVARCHAR(MAX),
-            @DownloadDate DATETIME;
+            @DownloadDate DATETIME,
+            @CompanyId nvarchar(100);
 
     DECLARE record_cursor CURSOR LOCAL FAST_FORWARD FOR
         SELECT
@@ -84,6 +85,7 @@ BEGIN
         );
 
         SET @HeaderId = SCOPE_IDENTITY();
+        SET @CompanyId = (SELECT TOP 1 CompanyId FROM WMS.dbo.Company WHERE Company = @Company) --new
 
         -- Parse line items and aggregate by Style + Color + Size + UPC + SKU + UnitPrice + RetailPrice
         -- Handle both array and single-object formats for PurchaseOrderDetails
@@ -141,22 +143,40 @@ BEGIN
                 ) AS Color
             FROM LineItems li
         ),
+        -- Lookup Color and Size from WMS database
+        WMS_Lookup AS (
+            SELECT
+                lic.LineItemId,
+                lic.UPC,
+                pr.Color AS WMS_Color, --new
+                pr.Size AS WMS_Size --new
+            FROM LineItemsWithColor lic
+            LEFT JOIN WMS.dbo.product p ON p.ProductId = lic.UPC --new
+            LEFT JOIN WMS.dbo.product_retail pr ON pr.Pid = p.Pid --new
+            WHERE p.CompanyId = @CompanyId --new
+        ),
         -- Parse SDQ key-value pairs (BK SDQ is single object)
         SDQ_Parsed AS (
             SELECT
                 lic.LineItemId,
                 lic.Style,
-                lic.Color,
+                -- BOM-conditional Color with WMS fallback for non-BOM items
+                CASE
+                    WHEN lic.BOMDetails_JSON IS NOT NULL THEN lic.Color  -- BOM item: use BOM Color
+                    ELSE COALESCE(wms.WMS_Color, lic.Color)              -- Non-BOM item: WMS first, fallback to JSON
+                END AS Color,
                 lic.UPC,
                 lic.SKU,
                 lic.UnitPrice,
                 lic.RetailPrice,
                 lic.VendorSizeDescription,
                 lic.BOMDetails_JSON,
+                wms.WMS_Size,
                 sdq.[key] AS SDQ_Key,
                 sdq.value AS SDQ_Value,
                 TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) AS SDQ_Index
             FROM LineItemsWithColor lic
+            LEFT JOIN WMS_Lookup wms ON wms.LineItemId = lic.LineItemId
             CROSS APPLY OPENJSON(lic.SDQ_JSON) AS sdq
             WHERE lic.SDQ_JSON IS NOT NULL
               AND sdq.[key] LIKE 'SDQ%'
@@ -167,10 +187,10 @@ BEGIN
             SELECT
                 s.Style,
                 s.Color,
-                -- BOM-conditional Size: 'PPK' if BOM exists, else VendorSizeDescription
+                -- BOM-conditional Size with WMS fallback for non-BOM items
                 CASE
-                    WHEN s.BOMDetails_JSON IS NOT NULL THEN 'PPK'
-                    ELSE s.VendorSizeDescription
+                    WHEN s.BOMDetails_JSON IS NOT NULL THEN 'PPK'    -- BOM item: always 'PPK'
+                    ELSE COALESCE(s.WMS_Size, s.VendorSizeDescription)  -- Non-BOM item: WMS first, fallback to JSON
                 END AS Size,
                 s.UPC,
                 s.SKU,
