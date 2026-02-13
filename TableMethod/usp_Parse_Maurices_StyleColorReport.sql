@@ -103,10 +103,11 @@ BEGIN
         )
         -- Insert aggregated detail rows: one per unique Style + Color + UPC
         INSERT INTO Custom88StyleColorReportDetail (
-            HeaderId, Style, Color, UPC, QtyOrdered
+            HeaderId, CustomerPO, Style, Color, UPC, QtyOrdered
         )
         SELECT
             @HeaderId,
+            @CustomerPO,
             Style,
             Color,
             UPC,

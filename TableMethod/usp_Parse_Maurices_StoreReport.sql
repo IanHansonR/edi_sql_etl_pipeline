@@ -102,10 +102,11 @@ BEGIN
         )
         -- Insert one detail row: single store with total quantity across all line items
         INSERT INTO Custom88StoreReportDetail (
-            HeaderId, StoreNumber, StoreQty
+            HeaderId, CustomerPO, StoreNumber, StoreQty
         )
         SELECT
             @HeaderId,
+            @CustomerPO,
             CAST(@StoreNumber AS INT),
             SUM(Qty) AS StoreQty
         FROM LineItems;

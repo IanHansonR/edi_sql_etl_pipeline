@@ -181,12 +181,13 @@ BEGIN
               AND q.SDQ_Index % 2 = 0
         )
         INSERT INTO Custom88DetailsReportDetail (
-            HeaderId, Style, Color, Size, UPC, SKU,
+            HeaderId, CustomerPO, Style, Color, Size, UPC, SKU,
             Qty, UOM, UnitPrice, RetailPrice, InnerPack, QtyPerInnerPack,
             StoreNumber
         )
         SELECT
             @HeaderId,
+            @CustomerPO,
             Style,
             Color,
             Size,

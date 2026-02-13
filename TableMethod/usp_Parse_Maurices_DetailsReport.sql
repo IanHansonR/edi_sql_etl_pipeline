@@ -127,12 +127,13 @@ BEGIN
               AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
         )
         INSERT INTO Custom88DetailsReportDetail (
-            HeaderId, Style, Color, Size, UPC, SKU,
+            HeaderId, CustomerPO, Style, Color, Size, UPC, SKU,
             Qty, UOM, UnitPrice, RetailPrice, InnerPack, QtyPerInnerPack,
             StoreNumber
         )
         SELECT
             @HeaderId,
+            @CustomerPO,
             Style,
             Color,
             Size,

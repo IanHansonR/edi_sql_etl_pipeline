@@ -156,10 +156,11 @@ BEGIN
         )
         -- Insert aggregated detail rows: one per unique store
         INSERT INTO Custom88StoreReportDetail (
-            HeaderId, StoreNumber, StoreQty
+            HeaderId, CustomerPO, StoreNumber, StoreQty
         )
         SELECT
             @HeaderId,
+            @CustomerPO,
             CAST(StoreNumber AS INT),
             SUM(Qty) AS StoreQty
         FROM StoreAllocations

@@ -231,12 +231,13 @@ BEGIN
         )
         -- Insert detail rows: one per UPC per store (no aggregation)
         INSERT INTO Custom88DetailsReportDetail (
-            HeaderId, Style, Color, Size, UPC, SKU,
+            HeaderId, CustomerPO, Style, Color, Size, UPC, SKU,
             Qty, UOM, UnitPrice, RetailPrice, InnerPack, QtyPerInnerPack,
             StoreNumber
         )
         SELECT
             @HeaderId,
+            @CustomerPO,
             Style,
             Color,
             Size,
