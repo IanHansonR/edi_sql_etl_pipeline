@@ -7,10 +7,14 @@
 
     Prerequisite: DetailsReport must have processed the record first (DetailsReportStatus = 'Success')
 
-    No SDQ parsing required.
-    Qty is extracted directly from PurchaseOrderDetails.Quantity.
+    No SDQ parsing required (neither BOM nor regular items use SDQ).
+    Qty is extracted directly from PurchaseOrderDetails.Quantity (parent Quantity for BOM items).
     StoreNumber comes from header-level PurchaseOrder.DivisionIdentifier.
     Since there is one store per order, detail will always contain exactly one row per order.
+
+    BOM Handling:
+    - BOM items work automatically for this report (no Color/Size fields)
+    - Quantity is extracted the same way for both BOM and regular items
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Maurices_StoreReport

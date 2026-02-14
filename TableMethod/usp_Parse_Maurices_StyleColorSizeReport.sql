@@ -7,12 +7,15 @@
 
     Prerequisite: DetailsReport must have processed the record first (DetailsReportStatus = 'Success')
 
-    No SDQ parsing required.
-    Qty is extracted directly from PurchaseOrderDetails.Quantity.
+    No SDQ parsing required (neither BOM nor regular items use SDQ).
+    Qty is extracted directly from PurchaseOrderDetails.Quantity (parent Quantity for BOM items).
     Detail rows are aggregated by Style + Color + Size + UPC + SKU with Qty = SUM of all quantities.
     Amount = UnitPrice * Qty for each detail row.
     UPC = NULL (not available in current Maurices EDI files).
-    Size = VendorSizeDescription[1] (2nd element of JSON array).
+
+    BOM Handling:
+    - Color is BOM-conditional: COALESCE(BOMDetails[0].ColorDescription, ColorDescription)
+    - Size is BOM-conditional: 'CA' if BOM exists, else VendorSizeDescription[1]
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Maurices_StyleColorSizeReport
@@ -87,8 +90,17 @@ BEGIN
             -- Case 1: PurchaseOrderDetails is an array
             SELECT
                 JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
-                JSON_VALUE(detail.value, '$.ColorDescription') AS Color,
-                JSON_VALUE(detail.value, '$.VendorSizeDescription[1]') AS Size,
+                -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
+                COALESCE(
+                    (SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
+                     FROM OPENJSON(JSON_QUERY(detail.value, '$.BOMDetails')) AS bom),
+                    JSON_VALUE(detail.value, '$.ColorDescription')
+                ) AS Color,
+                -- BOM-conditional Size: 'CA' for BOM items, else VendorSizeDescription[1]
+                CASE
+                    WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN 'CA'
+                    ELSE JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')
+                END AS Size,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
                 JSON_VALUE(detail.value, '$.ProductId') AS SKU,
                 TRY_CAST(JSON_VALUE(detail.value, '$.UnitPrice') AS DECIMAL(18,2)) AS UnitPrice,
@@ -103,8 +115,17 @@ BEGIN
             -- Case 2: PurchaseOrderDetails is a single object
             SELECT
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]') AS Size,
+                -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
+                COALESCE(
+                    (SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
+                     FROM OPENJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails')) AS bom),
+                    JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription')
+                ) AS Color,
+                -- BOM-conditional Size: 'CA' for BOM items, else VendorSizeDescription[1]
+                CASE
+                    WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN 'CA'
+                    ELSE JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')
+                END AS Size,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS SKU,
                 TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UnitPrice') AS DECIMAL(18,2)) AS UnitPrice,

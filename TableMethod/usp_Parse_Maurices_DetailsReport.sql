@@ -7,16 +7,22 @@
 
     Maurices Detail Mapping:
     - Style = PurchaseOrderDetails.VendorItemNumber
-    - Color = PurchaseOrderDetails.ColorDescription
-    - Size = PurchaseOrderDetails.VendorSizeDescription[1] (2nd element of JSON array)
+    - Color = BOM-conditional: COALESCE(BOMDetails[0].ColorDescription, ColorDescription)
+    - Size = BOM-conditional: 'CA' if BOM exists, else VendorSizeDescription[1]
     - UPC = NULL (not available in current Maurices EDI files)
     - SKU = PurchaseOrderDetails.ProductId
-    - InnerPack = NULL (not applicable for Maurices)
-    - QtyPerInnerPack = NULL (not applicable for Maurices)
-    - Qty = PurchaseOrderDetails.Quantity (decimal string, FLOAT->INT conversion)
+    - InnerPack = NULL (always NULL for Maurices, both BOM and non-BOM)
+    - QtyPerInnerPack = NULL (always NULL for Maurices, both BOM and non-BOM)
+    - Qty = PurchaseOrderDetails.Quantity (decimal string, FLOAT->INT conversion, parent Quantity used directly for BOM items)
     - StoreNumber = PurchaseOrder.DivisionIdentifier (header-level, one store per order)
-    - No SDQ parsing required
+    - No SDQ parsing required (neither BOM nor regular items use SDQ)
     - TotalItems = COUNT(DISTINCT SKU) since UPC is NULL
+
+    BOM Handling:
+    - Some Maurices POs contain BOM (Bill of Materials) line items mixed with regular line items
+    - BOM items have UOMTypeCode='CA' (Case), regular items have 'EA' (Each)
+    - BOM detection: Check for $.BOMDetails field presence using JSON_QUERY
+    - BOM items get Size='CA', Color from first BOM component (fallback to parent ColorDescription)
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Maurices_DetailsReport
@@ -94,8 +100,17 @@ BEGIN
             -- Case 1: PurchaseOrderDetails is an array
             SELECT
                 JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
-                JSON_VALUE(detail.value, '$.ColorDescription') AS Color,
-                JSON_VALUE(detail.value, '$.VendorSizeDescription[1]') AS Size,
+                -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
+                COALESCE(
+                    (SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
+                     FROM OPENJSON(JSON_QUERY(detail.value, '$.BOMDetails')) AS bom),
+                    JSON_VALUE(detail.value, '$.ColorDescription')
+                ) AS Color,
+                -- BOM-conditional Size: 'CA' for BOM items, else VendorSizeDescription[1]
+                CASE
+                    WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN 'CA'
+                    ELSE JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')
+                END AS Size,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
                 JSON_VALUE(detail.value, '$.ProductId') AS SKU,
                 JSON_VALUE(detail.value, '$.UOMTypeCode') AS UOM,
@@ -113,8 +128,17 @@ BEGIN
             -- Case 2: PurchaseOrderDetails is a single object
             SELECT
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]') AS Size,
+                -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
+                COALESCE(
+                    (SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
+                     FROM OPENJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails')) AS bom),
+                    JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription')
+                ) AS Color,
+                -- BOM-conditional Size: 'CA' for BOM items, else VendorSizeDescription[1]
+                CASE
+                    WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN 'CA'
+                    ELSE JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')
+                END AS Size,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS SKU,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.UOMTypeCode') AS UOM,

@@ -7,10 +7,14 @@
 
     Prerequisite: DetailsReport must have processed the record first (DetailsReportStatus = 'Success')
 
-    No SDQ parsing required.
-    Qty is extracted directly from PurchaseOrderDetails.Quantity.
+    No SDQ parsing required (neither BOM nor regular items use SDQ).
+    Qty is extracted directly from PurchaseOrderDetails.Quantity (parent Quantity for BOM items).
     Detail rows are aggregated by Style + Color + UPC with QtyOrdered = SUM of all line item quantities.
     UPC = NULL (not available in current Maurices EDI files).
+
+    BOM Handling:
+    - Color is BOM-conditional: COALESCE(BOMDetails[0].ColorDescription, ColorDescription)
+    - Size not used in this report (aggregates by Style + Color + UPC only)
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Maurices_StyleColorReport
@@ -83,7 +87,12 @@ BEGIN
             -- Case 1: PurchaseOrderDetails is an array
             SELECT
                 JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
-                JSON_VALUE(detail.value, '$.ColorDescription') AS Color,
+                -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
+                COALESCE(
+                    (SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
+                     FROM OPENJSON(JSON_QUERY(detail.value, '$.BOMDetails')) AS bom),
+                    JSON_VALUE(detail.value, '$.ColorDescription')
+                ) AS Color,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
                 CAST(TRY_CAST(JSON_VALUE(detail.value, '$.Quantity') AS FLOAT) AS INT) AS Qty
             FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
@@ -95,7 +104,12 @@ BEGIN
             -- Case 2: PurchaseOrderDetails is a single object
             SELECT
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
+                -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
+                COALESCE(
+                    (SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
+                     FROM OPENJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails')) AS bom),
+                    JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription')
+                ) AS Color,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
                 CAST(TRY_CAST(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.Quantity') AS FLOAT) AS INT) AS Qty
             WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
