@@ -20,3 +20,4 @@ nul
 ALTER_Custom88DailyReport_AddId.sql
 ALTER_EDIGatewayInbound_DailyReportStatus.sql
 ALTER_DetailTables_AddCustomerPO.sql
+.claude

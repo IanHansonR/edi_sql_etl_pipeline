@@ -13,6 +13,7 @@
     UPC = NULL (not available in current Maurices EDI files).
 
     BOM Handling:
+    - Style = BOM-conditional: ProductId if BOM exists, else VendorItemNumber
     - Color is BOM-conditional: COALESCE(BOMDetails[0].ColorDescription, ColorDescription)
     - Size not used in this report (aggregates by Style + Color + UPC only)
 */
@@ -86,7 +87,11 @@ BEGIN
         ;WITH LineItems AS (
             -- Case 1: PurchaseOrderDetails is an array
             SELECT
-                JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
+                -- BOM-conditional Style: ProductId for BOM items, VendorItemNumber for regular items
+                CASE
+                    WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN JSON_VALUE(detail.value, '$.ProductId')
+                    ELSE JSON_VALUE(detail.value, '$.VendorItemNumber')
+                END AS Style,
                 -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
                 COALESCE(
                     (SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
@@ -103,7 +108,11 @@ BEGIN
 
             -- Case 2: PurchaseOrderDetails is a single object
             SELECT
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
+                -- BOM-conditional Style: ProductId for BOM items, VendorItemNumber for regular items
+                CASE
+                    WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId')
+                    ELSE JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber')
+                END AS Style,
                 -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
                 COALESCE(
                     (SELECT TOP 1 JSON_VALUE(bom.value, '$.ColorDescription')
