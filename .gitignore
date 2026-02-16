@@ -21,3 +21,4 @@ ALTER_Custom88DailyReport_AddId.sql
 ALTER_EDIGatewayInbound_DailyReportStatus.sql
 ALTER_DetailTables_AddCustomerPO.sql
 .claude
+Test_Maurices_Style_Format.sql

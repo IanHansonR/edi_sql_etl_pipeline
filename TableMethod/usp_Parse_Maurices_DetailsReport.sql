@@ -99,10 +99,19 @@ BEGIN
         ;WITH LineItems AS (
             -- Case 1: PurchaseOrderDetails is an array
             SELECT
-                -- BOM-conditional Style: ProductId for BOM items, VendorItemNumber for regular items
+                -- BOM-conditional Style: ProductId for BOM items, VendorItemNumber + size letter for regular items
                 CASE
-                    WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN JSON_VALUE(detail.value, '$.ProductId')
-                    ELSE JSON_VALUE(detail.value, '$.VendorItemNumber')
+                    WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN
+                        JSON_VALUE(detail.value, '$.ProductId')
+                    ELSE
+                        JSON_VALUE(detail.value, '$.VendorItemNumber') + ' (' +
+                        COALESCE(
+                            NULLIF(
+                                UPPER(LEFT(LTRIM(REVERSE(LEFT(REVERSE(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')))), CHARINDEX(' ', REVERSE(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')))) + ' ') - 1))), 1)),
+                                ''
+                            ),
+                            'NULL'
+                        ) + ')'
                 END AS Style,
                 -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
                 COALESCE(
@@ -131,10 +140,19 @@ BEGIN
 
             -- Case 2: PurchaseOrderDetails is a single object
             SELECT
-                -- BOM-conditional Style: ProductId for BOM items, VendorItemNumber for regular items
+                -- BOM-conditional Style: ProductId for BOM items, VendorItemNumber + size letter for regular items
                 CASE
-                    WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId')
-                    ELSE JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber')
+                    WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN
+                        JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId')
+                    ELSE
+                        JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') + ' (' +
+                        COALESCE(
+                            NULLIF(
+                                UPPER(LEFT(LTRIM(REVERSE(LEFT(REVERSE(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')))), CHARINDEX(' ', REVERSE(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')))) + ' ') - 1))), 1)),
+                                ''
+                            ),
+                            'NULL'
+                        ) + ')'
                 END AS Style,
                 -- BOM-conditional Color: try BOM first, fallback to direct ColorDescription
                 COALESCE(
