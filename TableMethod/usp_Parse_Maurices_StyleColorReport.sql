@@ -9,8 +9,7 @@
 
     No SDQ parsing required (neither BOM nor regular items use SDQ).
     Qty is extracted directly from PurchaseOrderDetails.Quantity (parent Quantity for BOM items).
-    Detail rows are aggregated by Style + Color + UPC with QtyOrdered = SUM of all line item quantities.
-    UPC = NULL (not available in current Maurices EDI files).
+    Detail rows are aggregated by Style + Color with QtyOrdered = SUM of all line item quantities.
 
     BOM Handling:
     - Style = BOM-conditional: ProductId if BOM exists, else VendorItemNumber
@@ -142,19 +141,18 @@ BEGIN
             WHERE ISJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')) = 1
               AND LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '{'
         )
-        -- Insert aggregated detail rows: one per unique Style + Color + UPC
+        -- Insert aggregated detail rows: one per unique Style + Color
         INSERT INTO Custom88StyleColorReportDetail (
-            HeaderId, CustomerPO, Style, Color, UPC, QtyOrdered
+            HeaderId, CustomerPO, Style, Color, QtyOrdered
         )
         SELECT
             @HeaderId,
             @CustomerPO,
             Style,
             Color,
-            UPC,
             SUM(Qty) AS QtyOrdered
         FROM LineItems
-        GROUP BY Style, Color, UPC;
+        GROUP BY Style, Color;
 
         -- Mark as processed
         UPDATE EDIGatewayInbound

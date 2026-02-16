@@ -10,8 +10,7 @@
     SA StyleColor Mapping:
     - Style = PurchaseOrderDetails.VendorItemNumber
     - Color = PurchaseOrderDetails.ColorDescription (direct, no BOM)
-    - UPC = PurchaseOrderDetails.ProductId
-    - QtyOrdered = SUM of SDQ quantities across all stores (aggregated by Style + Color + UPC)
+    - QtyOrdered = SUM of SDQ quantities across all stores (aggregated by Style + Color)
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Belk_SA_StyleColorReport
@@ -181,20 +180,19 @@ BEGIN
             WHERE s.SDQ_Index % 2 = 1
               AND q.SDQ_Index % 2 = 0
         )
-        -- Insert aggregated detail rows: one per unique Style + Color + UPC
+        -- Insert aggregated detail rows: one per unique Style + Color
         INSERT INTO Custom88StyleColorReportDetail (
-            HeaderId, CustomerPO, Style, Color, UPC, QtyOrdered
+            HeaderId, CustomerPO, Style, Color, QtyOrdered
         )
         SELECT
             @HeaderId,
             @CustomerPO,
             Style,
             Color,
-            UPC,
             SUM(Qty) AS QtyOrdered
         FROM StoreAllocations
         WHERE Qty > 0
-        GROUP BY Style, Color, UPC;
+        GROUP BY Style, Color;
 
         -- Mark as processed
         UPDATE EDIGatewayInbound

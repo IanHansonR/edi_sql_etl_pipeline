@@ -8,8 +8,7 @@
     Prerequisite: DetailsReport must have processed the record first (DetailsReportStatus = 'Success')
 
     SDQ is a single JSON object (BULK pattern).
-    Detail rows are aggregated by Style + Color + UPC with QtyOrdered = SUM of all store quantities.
-    UPC = PurchaseOrderDetails.ProductId (one distinct row per UPC).
+    Detail rows are aggregated by Style + Color with QtyOrdered = SUM of all store quantities.
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Arula_SA_StyleColorReport
@@ -128,20 +127,19 @@ BEGIN
             WHERE s.SDQ_Index % 2 = 1
               AND q.SDQ_Index % 2 = 0
         )
-        -- Insert aggregated detail rows: one per unique Style + Color + UPC
+        -- Insert aggregated detail rows: one per unique Style + Color
         INSERT INTO Custom88StyleColorReportDetail (
-            HeaderId, CustomerPO, Style, Color, UPC, QtyOrdered
+            HeaderId, CustomerPO, Style, Color, QtyOrdered
         )
         SELECT
             @HeaderId,
             @CustomerPO,
             Style,
             Color,
-            UPC,
             SUM(Qty) AS QtyOrdered
         FROM StoreAllocations
         WHERE Qty > 0
-        GROUP BY Style, Color, UPC;
+        GROUP BY Style, Color;
 
         -- Mark as processed
         UPDATE EDIGatewayInbound
