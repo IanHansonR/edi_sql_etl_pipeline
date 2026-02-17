@@ -1,13 +1,13 @@
 /*
     Stored Procedure: usp_Parse_Belk_BK_StoreReport
-    Purpose: Parse Belk BK (Bulk) EDI 850 orders from EDIGatewayInbound and populate Store Report tables
+    Purpose: Parse Belk BK (Bulk) and RL EDI 850 orders from EDIGatewayInbound and populate Store Report tables
 
-    Source: EDIGatewayInbound (filtered by CompanyCode = 'BELK', PurchaseOrderTypeCode = 'BK')
+    Source: EDIGatewayInbound (filtered by CompanyCode = 'BELK', PurchaseOrderTypeCode IN ('BK', 'RL'))
     Target: Custom88StoreReportHeader, Custom88StoreReportDetail
 
     Prerequisite: DetailsReport must have processed the record first (DetailsReportStatus = 'Success')
 
-    BK Store Mapping:
+    BK/RL Store Mapping:
     - UPC = PurchaseOrderDetails.ProductId
     - StoreNumber = Parsed from SDQ
     - StoreQty = SUM of all line item quantities for that store (aggregated by StoreNumber)
@@ -36,7 +36,7 @@ BEGIN
           AND StoreReportStatus IS NULL
           AND DetailsReportStatus = 'Success'
           AND ISJSON(JSONContent) = 1
-          AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrderTypeCode') = 'BK'
+          AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrderTypeCode') IN ('BK', 'RL')
         ORDER BY Created ASC;
 
     OPEN record_cursor;

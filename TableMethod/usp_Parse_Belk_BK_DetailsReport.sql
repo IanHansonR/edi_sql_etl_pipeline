@@ -1,13 +1,13 @@
     /*
     Stored Procedure: usp_Parse_Belk_BK_DetailsReport
-    Purpose: Parse Belk BK (Bulk) EDI 850 orders from EDIGatewayInbound and populate Details Report tables
+    Purpose: Parse Belk BK (Bulk) and RL EDI 850 orders from EDIGatewayInbound and populate Details Report tables
 
-    Source: EDIGatewayInbound (filtered by CompanyCode = 'BELK', PurchaseOrderTypeCode = 'BK')
+    Source: EDIGatewayInbound (filtered by CompanyCode = 'BELK', PurchaseOrderTypeCode IN ('BK', 'RL'))
     Target: Custom88DetailsReportHeader, Custom88DetailsReportDetail
 
-    Note: BK orders are HYBRID - can contain BOTH BOM items (prepack-style) AND single items in the SAME purchase order.
+    Note: BK and RL orders are HYBRID - can contain BOTH BOM items (prepack-style) AND single items in the SAME purchase order.
 
-    BK Detail Mapping:
+    BK/RL Detail Mapping:
     - UPC = PurchaseOrderDetails.ProductId
     - SKU = NULL (not BuyerPartNumber per user requirement)
     - Style = PurchaseOrderDetails.VendorItemNumber
@@ -44,7 +44,7 @@ BEGIN
           AND Status = 'Downloaded'
           AND DetailsReportStatus IS NULL
           AND ISJSON(JSONContent) = 1
-          AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrderTypeCode') = 'BK'
+          AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrderTypeCode') IN ('BK', 'RL')
         ORDER BY Created ASC;
 
     OPEN record_cursor;

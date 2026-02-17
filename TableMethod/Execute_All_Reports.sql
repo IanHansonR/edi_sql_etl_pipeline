@@ -33,9 +33,9 @@ EXEC usp_Parse_Maurices_DetailsReport;
 PRINT 'Maurices DetailsReports complete.';
 PRINT '';
 
--- Belk DetailsReports
+-- Belk DetailsReports (BK and RL order types)
 PRINT 'Processing Belk DetailsReports...';
-EXEC usp_Parse_Belk_BK_DetailsReport;
+EXEC usp_Parse_Belk_BK_DetailsReport;  -- Processes both BK and RL orders
 EXEC usp_Parse_Belk_SA_DetailsReport;
 PRINT 'Belk DetailsReports complete.';
 PRINT '';
@@ -90,11 +90,11 @@ EXEC usp_Parse_Maurices_StyleColorSizeReport;
 PRINT 'Maurices downstream reports complete.';
 PRINT '';
 
--- Belk Downstream Reports
+-- Belk Downstream Reports (BK/RL and SA order types)
 PRINT 'Processing Belk downstream reports...';
-EXEC usp_Parse_Belk_BK_StyleColorReport;
-EXEC usp_Parse_Belk_BK_StoreReport;
-EXEC usp_Parse_Belk_BK_StyleColorSizeReport;
+EXEC usp_Parse_Belk_BK_StyleColorReport;      -- Processes both BK and RL orders
+EXEC usp_Parse_Belk_BK_StoreReport;           -- Processes both BK and RL orders
+EXEC usp_Parse_Belk_BK_StyleColorSizeReport;  -- Processes both BK and RL orders
 
 EXEC usp_Parse_Belk_SA_StyleColorReport;
 EXEC usp_Parse_Belk_SA_StoreReport;

@@ -1,13 +1,13 @@
 /*
     Stored Procedure: usp_Parse_Belk_BK_StyleColorReport
-    Purpose: Parse Belk BK (Bulk) EDI 850 orders from EDIGatewayInbound and populate StyleColor Report tables
+    Purpose: Parse Belk BK (Bulk) and RL EDI 850 orders from EDIGatewayInbound and populate StyleColor Report tables
 
-    Source: EDIGatewayInbound (filtered by CompanyCode = 'BELK', PurchaseOrderTypeCode = 'BK')
+    Source: EDIGatewayInbound (filtered by CompanyCode = 'BELK', PurchaseOrderTypeCode IN ('BK', 'RL'))
     Target: Custom88StyleColorReportHeader, Custom88StyleColorReportDetail
 
     Prerequisite: DetailsReport must have processed the record first (DetailsReportStatus = 'Success')
 
-    BK StyleColor Mapping:
+    BK/RL StyleColor Mapping:
     - Style = PurchaseOrderDetails.VendorItemNumber
     - Color = COALESCE(BOMDetails[0].ColorDescription, ColorDescription) -- BOM-conditional
     - QtyOrdered = SUM of SDQ quantities across all stores (aggregated by Style + Color)
@@ -37,7 +37,7 @@ BEGIN
           AND StyleColorReportStatus IS NULL
           AND DetailsReportStatus = 'Success'
           AND ISJSON(JSONContent) = 1
-          AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrderTypeCode') = 'BK'
+          AND JSON_VALUE(JSONContent, '$.PurchaseOrderHeader.PurchaseOrderTypeCode') IN ('BK', 'RL')
         ORDER BY Created ASC;
 
     OPEN record_cursor;
