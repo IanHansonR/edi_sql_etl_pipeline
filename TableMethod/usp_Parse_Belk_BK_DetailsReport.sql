@@ -10,7 +10,7 @@
     BK/RL Detail Mapping:
     - UPC = PurchaseOrderDetails.ProductId
     - SKU = NULL (not BuyerPartNumber per user requirement)
-    - Style = PurchaseOrderDetails.VendorItemNumber
+    - Style = VendorItemNumber + ' P' + [BOM count] when BOM exists, else VendorItemNumber
     - Color = COALESCE(BOMDetails[0].ColorDescription, ColorDescription) -- BOM-conditional
     - Size = 'PPK' if BOM exists, else VendorSizeDescription[1] -- BOM-conditional, array index
     - UnitPrice = PurchaseOrderDetails.UnitPrice
@@ -138,7 +138,13 @@ BEGIN
         LineItemsWithColor AS (
             SELECT
                 li.LineItemId,
-                li.Style,
+                CASE
+                    WHEN li.BOMDetails_JSON IS NOT NULL THEN
+                        li.Style + ' P' + CAST((SELECT SUM(TRY_CAST(JSON_VALUE(bom.value, '$.Quantity') AS INT))
+                                                FROM OPENJSON(li.BOMDetails_JSON) AS bom) AS NVARCHAR(10))
+                    ELSE
+                        li.Style
+                END AS Style,
                 li.UPC,
                 li.SKU,
                 li.UOM,

@@ -87,7 +87,14 @@ BEGIN
         ;WITH LineItems AS (
             -- Case 1: PurchaseOrderDetails is an array
             SELECT
-                JSON_VALUE(detail.value, '$.VendorItemNumber') AS Style,
+                CASE
+                    WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN
+                        JSON_VALUE(detail.value, '$.VendorItemNumber') + ' P' +
+                        CAST((SELECT SUM(TRY_CAST(JSON_VALUE(bom.value, '$.Quantity') AS INT))
+                              FROM OPENJSON(JSON_QUERY(detail.value, '$.BOMDetails')) AS bom) AS NVARCHAR(10))
+                    ELSE
+                        JSON_VALUE(detail.value, '$.VendorItemNumber')
+                END AS Style,
                 JSON_VALUE(detail.value, '$.ColorDescription') AS Color,
                 CASE
                     WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN 'PPK'
@@ -106,7 +113,14 @@ BEGIN
 
             -- Case 2: PurchaseOrderDetails is a single object
             SELECT
-                JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') AS Style,
+                CASE
+                    WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN
+                        JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') + ' P' +
+                        CAST((SELECT SUM(TRY_CAST(JSON_VALUE(bom.value, '$.Quantity') AS INT))
+                              FROM OPENJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails')) AS bom) AS NVARCHAR(10))
+                    ELSE
+                        JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber')
+                END AS Style,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription') AS Color,
                 CASE
                     WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN 'PPK'
