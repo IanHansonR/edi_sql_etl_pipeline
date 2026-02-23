@@ -102,6 +102,15 @@ EXEC usp_Parse_Belk_SA_StyleColorSizeReport;
 PRINT 'Belk downstream reports complete.';
 PRINT '';
 
+PRINT '----------------------------------------------------------------------';
+PRINT 'Processing PrePack Summary reports...';
+EXEC usp_Parse_Kohls_PrePackSummaryReport;
+EXEC usp_Parse_Arula_PrePackSummaryReport;
+EXEC usp_Parse_Maurices_PrePackSummaryReport;
+EXEC usp_Parse_Belk_PrePackSummaryReport;
+PRINT 'PrePack Summary reports complete.';
+PRINT '';
+
 PRINT '======================================================================';
 PRINT 'PHASE 4: Processing DailyReport';
 PRINT '======================================================================';

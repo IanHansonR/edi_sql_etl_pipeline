@@ -22,3 +22,5 @@ ALTER_EDIGatewayInbound_DailyReportStatus.sql
 ALTER_DetailTables_AddCustomerPO.sql
 .claude
 Test_Maurices_Style_Format.sql
+ALTER_EDIGatewayInbound_PrePackSummaryReportStatus.sql
+CREATE_Custom88PrePackSummaryReport.sql
