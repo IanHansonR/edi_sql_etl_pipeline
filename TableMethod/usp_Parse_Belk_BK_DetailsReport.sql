@@ -164,6 +164,54 @@ BEGIN
             FROM LineItems li
         ),
 
+        -- Handle both array and single-object SDQ formats (RL uses array segments, BK uses single object)
+        SDQ_Segments AS (
+            -- Case 1: SDQ is an array of segment objects
+            SELECT
+                lic.LineItemId,
+                lic.Style,
+                lic.UPC,
+                lic.SKU,
+                lic.UOM,
+                lic.UnitPrice,
+                lic.RetailPrice,
+                lic.VendorSizeDescription,
+                lic.Pack,
+                lic.PackSize,
+                lic.BOMDetails_JSON,
+                lic.Color,
+                sdq_segment.[key] AS SDQ_Segment_Index,
+                sdq_segment.value AS SDQ_Segment_JSON
+            FROM LineItemsWithColor lic
+            CROSS APPLY OPENJSON(lic.SDQ_JSON) AS sdq_segment
+            WHERE lic.SDQ_JSON IS NOT NULL
+              AND ISJSON(lic.SDQ_JSON) = 1
+              AND LEFT(LTRIM(lic.SDQ_JSON), 1) = '['
+
+            UNION ALL
+
+            -- Case 2: SDQ is a single object
+            SELECT
+                lic.LineItemId,
+                lic.Style,
+                lic.UPC,
+                lic.SKU,
+                lic.UOM,
+                lic.UnitPrice,
+                lic.RetailPrice,
+                lic.VendorSizeDescription,
+                lic.Pack,
+                lic.PackSize,
+                lic.BOMDetails_JSON,
+                lic.Color,
+                '0' AS SDQ_Segment_Index,
+                lic.SDQ_JSON AS SDQ_Segment_JSON
+            FROM LineItemsWithColor lic
+            WHERE lic.SDQ_JSON IS NOT NULL
+              AND ISJSON(lic.SDQ_JSON) = 1
+              AND LEFT(LTRIM(lic.SDQ_JSON), 1) = '{'
+        ),
+
         -- Lookup Color and Size from WMS database
         WMS_Lookup AS (
             SELECT
@@ -179,20 +227,19 @@ BEGIN
             --LEFT JOIN WMS.dbo.product_retail pr ON pr.productid = lic.UPC
             --LEFT JOIN WMS.dbo.product p ON p.Pid = pr.Pid
         ),
-        -- Parse SDQ key-value pairs for each line item (single-object SDQ, no array segments)
+        -- Parse SDQ key-value pairs (handles both array and single-object SDQ)
         SDQ_Parsed AS (
             SELECT
-                lic.*,
+                seg.*,
                 wms.WMS_Color,
                 wms.WMS_Size,
                 sdq.[key] AS SDQ_Key,
                 sdq.value AS SDQ_Value,
                 TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) AS SDQ_Index
-            FROM LineItemsWithColor lic
-            LEFT JOIN WMS_Lookup wms ON wms.LineItemId = lic.LineItemId
-            CROSS APPLY OPENJSON(lic.SDQ_JSON) AS sdq
-            WHERE lic.SDQ_JSON IS NOT NULL
-              AND sdq.[key] LIKE 'SDQ%'
+            FROM SDQ_Segments seg
+            LEFT JOIN WMS_Lookup wms ON wms.LineItemId = seg.LineItemId
+            CROSS APPLY OPENJSON(seg.SDQ_Segment_JSON) AS sdq
+            WHERE sdq.[key] LIKE 'SDQ%'
               AND TRY_CAST(SUBSTRING(sdq.[key], 4, 2) AS INT) >= 3
         ),
         -- Pair stores (odd index) with quantities (even index)
@@ -231,6 +278,7 @@ BEGIN
             INNER JOIN SDQ_Parsed q
                 ON s.LineItemId = q.LineItemId
                 AND s.UPC = q.UPC
+                AND s.SDQ_Segment_Index = q.SDQ_Segment_Index
                 AND s.SDQ_Index + 1 = q.SDQ_Index
             WHERE s.SDQ_Index % 2 = 1
               AND q.SDQ_Index % 2 = 0
