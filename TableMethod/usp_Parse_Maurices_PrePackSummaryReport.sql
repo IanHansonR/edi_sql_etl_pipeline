@@ -69,13 +69,16 @@ BEGIN
         -- Check if this PO has any BOM line items
         SET @HasBOMs = 0;
 
-        -- Check array format
-        IF EXISTS (
-            SELECT 1
-            FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
-            WHERE JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL
-        )
-            SET @HasBOMs = 1;
+        -- Check array format (guard with format check before calling OPENJSON)
+        IF LEFT(LTRIM(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails')), 1) = '['
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM OPENJSON(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails') AS detail
+                WHERE JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL
+            )
+                SET @HasBOMs = 1;
+        END
 
         -- Check single-object format
         IF @HasBOMs = 0
