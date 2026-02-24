@@ -16,7 +16,7 @@
     BOM Handling:
     - Style = BOM-conditional: ProductId if BOM exists, else VendorItemNumber
     - Color is BOM-conditional: COALESCE(BOMDetails[0].ColorDescription, ColorDescription)
-    - Size is BOM-conditional: 'CA' if BOM exists, else second word of VendorSizeDescription (e.g. "SMALL REGULAR" -> "REGULAR")
+    - Size is BOM-conditional: 'CA' if BOM exists, else full VendorSizeDescription string (e.g. "SMALL REGULAR")
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Maurices_StyleColorSizeReport
@@ -121,16 +121,12 @@ BEGIN
                     JSON_VALUE(detail.value, '$.ColorDescription')
                 ) AS Color,
                 -- BOM-conditional Size: 'CA' for BOM items
-                -- else old format: VendorSizeDescription[1]; new format: second word of VendorSizeDescription
+                -- else old format: VendorSizeDescription[1]; new format: full VendorSizeDescription string
                 CASE
                     WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN 'CA'
                     ELSE COALESCE(
                         NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription[1]'))), ''),
-                        LTRIM(SUBSTRING(
-                            LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))),
-                            CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))) + ' ') + 1,
-                            LEN(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))))
-                        ))
+                        LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription')))
                     )
                 END AS Size,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
@@ -177,16 +173,12 @@ BEGIN
                     JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription')
                 ) AS Color,
                 -- BOM-conditional Size: 'CA' for BOM items
-                -- else old format: VendorSizeDescription[1]; new format: second word of VendorSizeDescription
+                -- else old format: VendorSizeDescription[1]; new format: full VendorSizeDescription string
                 CASE
                     WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN 'CA'
                     ELSE COALESCE(
                         NULLIF(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]'))), ''),
-                        LTRIM(SUBSTRING(
-                            LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))),
-                            CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))) + ' ') + 1,
-                            LEN(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))))
-                        ))
+                        LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription')))
                     )
                 END AS Size,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
