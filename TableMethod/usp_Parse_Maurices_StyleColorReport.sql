@@ -93,8 +93,18 @@ BEGIN
                     ELSE
                         JSON_VALUE(detail.value, '$.VendorItemNumber') + ' (' +
                         COALESCE(
+                            -- Old format: VendorSizeDescription is array, use [1] (first letter of last word)
                             NULLIF(
                                 UPPER(LEFT(LTRIM(REVERSE(LEFT(REVERSE(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')))), CHARINDEX(' ', REVERSE(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')))) + ' ') - 1))), 1)),
+                                ''
+                            ),
+                            -- New format: VendorSizeDescription is plain string, use second word
+                            NULLIF(
+                                UPPER(LEFT(LTRIM(SUBSTRING(
+                                    LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))),
+                                    CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))) + ' ') + 1,
+                                    LEN(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))))
+                                )), 1)),
                                 ''
                             ),
                             'NULL'
@@ -123,8 +133,18 @@ BEGIN
                     ELSE
                         JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') + ' (' +
                         COALESCE(
+                            -- Old format: VendorSizeDescription is array, use [1] (first letter of last word)
                             NULLIF(
                                 UPPER(LEFT(LTRIM(REVERSE(LEFT(REVERSE(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')))), CHARINDEX(' ', REVERSE(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')))) + ' ') - 1))), 1)),
+                                ''
+                            ),
+                            -- New format: VendorSizeDescription is plain string, use second word
+                            NULLIF(
+                                UPPER(LEFT(LTRIM(SUBSTRING(
+                                    LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))),
+                                    CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))) + ' ') + 1,
+                                    LEN(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))))
+                                )), 1)),
                                 ''
                             ),
                             'NULL'

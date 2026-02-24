@@ -16,7 +16,7 @@
     BOM Handling:
     - Style = BOM-conditional: ProductId if BOM exists, else VendorItemNumber
     - Color is BOM-conditional: COALESCE(BOMDetails[0].ColorDescription, ColorDescription)
-    - Size is BOM-conditional: 'CA' if BOM exists, else VendorSizeDescription[1]
+    - Size is BOM-conditional: 'CA' if BOM exists, else second word of VendorSizeDescription (e.g. "SMALL REGULAR" -> "REGULAR")
 */
 
 CREATE OR ALTER PROCEDURE dbo.usp_Parse_Maurices_StyleColorSizeReport
@@ -97,8 +97,18 @@ BEGIN
                     ELSE
                         JSON_VALUE(detail.value, '$.VendorItemNumber') + ' (' +
                         COALESCE(
+                            -- Old format: VendorSizeDescription is array, use [1] (first letter of last word)
                             NULLIF(
                                 UPPER(LEFT(LTRIM(REVERSE(LEFT(REVERSE(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')))), CHARINDEX(' ', REVERSE(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')))) + ' ') - 1))), 1)),
+                                ''
+                            ),
+                            -- New format: VendorSizeDescription is plain string, use second word
+                            NULLIF(
+                                UPPER(LEFT(LTRIM(SUBSTRING(
+                                    LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))),
+                                    CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))) + ' ') + 1,
+                                    LEN(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))))
+                                )), 1)),
                                 ''
                             ),
                             'NULL'
@@ -110,10 +120,18 @@ BEGIN
                      FROM OPENJSON(JSON_QUERY(detail.value, '$.BOMDetails')) AS bom),
                     JSON_VALUE(detail.value, '$.ColorDescription')
                 ) AS Color,
-                -- BOM-conditional Size: 'CA' for BOM items, else VendorSizeDescription[1]
+                -- BOM-conditional Size: 'CA' for BOM items
+                -- else old format: VendorSizeDescription[1]; new format: second word of VendorSizeDescription
                 CASE
                     WHEN JSON_QUERY(detail.value, '$.BOMDetails') IS NOT NULL THEN 'CA'
-                    ELSE JSON_VALUE(detail.value, '$.VendorSizeDescription[1]')
+                    ELSE COALESCE(
+                        NULLIF(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription[1]'))), ''),
+                        LTRIM(SUBSTRING(
+                            LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))),
+                            CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))) + ' ') + 1,
+                            LEN(LTRIM(RTRIM(JSON_VALUE(detail.value, '$.VendorSizeDescription'))))
+                        ))
+                    )
                 END AS Size,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
                 JSON_VALUE(detail.value, '$.ProductId') AS SKU,
@@ -135,8 +153,18 @@ BEGIN
                     ELSE
                         JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorItemNumber') + ' (' +
                         COALESCE(
+                            -- Old format: VendorSizeDescription is array, use [1] (first letter of last word)
                             NULLIF(
                                 UPPER(LEFT(LTRIM(REVERSE(LEFT(REVERSE(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')))), CHARINDEX(' ', REVERSE(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')))) + ' ') - 1))), 1)),
+                                ''
+                            ),
+                            -- New format: VendorSizeDescription is plain string, use second word
+                            NULLIF(
+                                UPPER(LEFT(LTRIM(SUBSTRING(
+                                    LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))),
+                                    CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))) + ' ') + 1,
+                                    LEN(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))))
+                                )), 1)),
                                 ''
                             ),
                             'NULL'
@@ -148,10 +176,18 @@ BEGIN
                      FROM OPENJSON(JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails')) AS bom),
                     JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ColorDescription')
                 ) AS Color,
-                -- BOM-conditional Size: 'CA' for BOM items, else VendorSizeDescription[1]
+                -- BOM-conditional Size: 'CA' for BOM items
+                -- else old format: VendorSizeDescription[1]; new format: second word of VendorSizeDescription
                 CASE
                     WHEN JSON_QUERY(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.BOMDetails') IS NOT NULL THEN 'CA'
-                    ELSE JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]')
+                    ELSE COALESCE(
+                        NULLIF(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription[1]'))), ''),
+                        LTRIM(SUBSTRING(
+                            LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))),
+                            CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))) + ' ') + 1,
+                            LEN(LTRIM(RTRIM(JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.VendorSizeDescription'))))
+                        ))
+                    )
                 END AS Size,
                 CAST(NULL AS NVARCHAR(100)) AS UPC,
                 JSON_VALUE(@JSONContent, '$.PurchaseOrderHeader.PurchaseOrder.PurchaseOrderDetails.ProductId') AS SKU,

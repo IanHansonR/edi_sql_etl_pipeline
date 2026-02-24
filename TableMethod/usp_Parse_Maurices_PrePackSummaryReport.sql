@@ -14,7 +14,7 @@
     Maurices PrePack Summary Mapping:
     - PrePackNUMBER = PurchaseOrderDetails.ProductId (parent level)
     - PrePackSKU = PurchaseOrderDetails.ProductId (parent level)
-    - ComponentSTYLE = BOMDetails.VendorItemNumber + cut notation from BOMDetails.VendorSizeDescription[1]
+    - ComponentSTYLE = BOMDetails.VendorItemNumber + cut notation from second word of BOMDetails.VendorSizeDescription (e.g. "SMALL REGULAR" -> "R")
                        Format: "2569109 (R)" using same last-word-first-letter pattern as regular Maurices items
     - ComponentCOLOR = BOMDetails.ColorDescription
     - ComponentSIZE = BOMDetails.SizeDescription
@@ -167,12 +167,23 @@ BEGIN
             SELECT
                 ub.PrePackNUMBER,
                 ub.PrePackSKU,
-                -- ComponentSTYLE: VendorItemNumber + cut notation from VendorSizeDescription[1]
-                -- Same last-word-first-letter pattern as regular Maurices items
+                -- ComponentSTYLE: VendorItemNumber + cut notation from VendorSizeDescription
+                -- Old format: array -> use [1] (first letter of last word)
+                -- New format: plain string -> use second word (e.g. "SMALL REGULAR" -> "R")
                 JSON_VALUE(bom.value, '$.VendorItemNumber') + ' (' +
                 COALESCE(
+                    -- Old format: VendorSizeDescription is array, use [1] (first letter of last word)
                     NULLIF(
                         UPPER(LEFT(LTRIM(REVERSE(LEFT(REVERSE(LTRIM(RTRIM(JSON_VALUE(bom.value, '$.VendorSizeDescription[1]')))), CHARINDEX(' ', REVERSE(LTRIM(RTRIM(JSON_VALUE(bom.value, '$.VendorSizeDescription[1]')))) + ' ') - 1))), 1)),
+                        ''
+                    ),
+                    -- New format: VendorSizeDescription is plain string, use second word
+                    NULLIF(
+                        UPPER(LEFT(LTRIM(SUBSTRING(
+                            LTRIM(RTRIM(JSON_VALUE(bom.value, '$.VendorSizeDescription'))),
+                            CHARINDEX(' ', LTRIM(RTRIM(JSON_VALUE(bom.value, '$.VendorSizeDescription'))) + ' ') + 1,
+                            LEN(LTRIM(RTRIM(JSON_VALUE(bom.value, '$.VendorSizeDescription'))))
+                        )), 1)),
                         ''
                     ),
                     'NULL'
