@@ -2,6 +2,8 @@
 Analytics_ETL_Pipeline/
 context/
 Reports_Am/
+Analytics_ETL_Pipeline/
+sql/
 
 # IDE
 .vscode/
